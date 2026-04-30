@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Premium Old Maid - ババ抜き</title>
+    <title>Premium Daifugo - 大富豪</title>
     <link rel="stylesheet" href="style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,13 +12,20 @@
 <body>
     <div id="game-container">
         <header>
-            <h1>OLD MAID</h1>
+            <h1>DAIFUGO</h1>
             <div class="header-controls">
                 <select id="bgm-selector" class="glass-select">
                     <option value="none">BGMを選択...</option>
-                    <option value="satie">サティ：ジムノペディ 第1番</option>
-                    <option value="bach">バッハ：G線上のアリア</option>
-                    <option value="beethoven">ベートーヴェン：月光ソナタ 第1楽章</option>
+                    <optgroup label="モーツァルト">
+                        <option value="mozart_pianosonata15">ピアノソナタ第15番 第1楽章</option>
+                        <option value="mozart_pianoconcerto21">ピアノ協奏曲第21番 第3楽章</option>
+                        <option value="mozart_pianoconcerto26">ピアノ協奏曲第26番「戴冠式」</option>
+                    </optgroup>
+                    <optgroup label="ショパン">
+                        <option value="chopin_kareinaru">華麗なる大円舞曲</option>
+                        <option value="chopin_koinunowaltz">子犬のワルツ</option>
+                        <option value="chopin_nocturne9_2">ノクターン op.9-2</option>
+                    </optgroup>
                 </select>
                 <button id="sound-toggle" class="icon-btn">🔇</button>
                 <div class="status-panel">
@@ -34,7 +41,7 @@
                 <div class="player-info">
                     <span class="avatar">🐻</span>
                     <span class="name">BEAR</span>
-                    <span class="rank-badge hidden"></span>
+                    <span class="rank-label hidden"></span>
                 </div>
             </section>
 
@@ -43,15 +50,16 @@
                 <div class="player-info">
                     <span class="avatar">🦊</span>
                     <span class="name">FOX</span>
-                    <span class="rank-badge hidden"></span>
+                    <span class="rank-label hidden"></span>
                 </div>
                 <div class="hand-container" id="hand-1"></div>
             </section>
 
-            <!-- Discard Area (Center) -->
+            <!-- Play Area (Center) -->
             <section id="table-area">
-                <div id="discard-pile"></div>
+                <div id="field-cards"></div>
                 <div id="message-overlay" class="hidden"></div>
+                <div id="special-overlay" class="hidden"></div>
             </section>
 
             <!-- CPU 3 (Right) -->
@@ -59,17 +67,21 @@
                 <div class="player-info">
                     <span class="avatar">🐰</span>
                     <span class="name">RABBIT</span>
-                    <span class="rank-badge hidden"></span>
+                    <span class="rank-label hidden"></span>
                 </div>
                 <div class="hand-container" id="hand-3"></div>
             </section>
 
             <!-- Player 0 (Bottom - You) -->
             <section id="player-0" class="player-area bottom">
+                <div class="action-controls hidden" id="action-controls">
+                    <button id="play-btn" class="primary-btn small">出す</button>
+                    <button id="pass-btn" class="secondary-btn small">パス</button>
+                </div>
                 <div class="player-info">
                     <span class="avatar">👤</span>
                     <span class="name">YOU</span>
-                    <span class="rank-badge hidden"></span>
+                    <span class="rank-label hidden"></span>
                 </div>
                 <div class="hand-container" id="hand-0"></div>
             </section>
@@ -86,7 +98,7 @@
         <div id="result-overlay" class="overlay hidden">
             <div class="result-content">
                 <h2 id="result-title"></h2>
-                <p id="result-message"></p>
+                <div id="rank-list"></div>
                 <button id="play-again-btn" class="primary-btn">タイトルへ</button>
             </div>
         </div>

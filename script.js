@@ -8,7 +8,15 @@ class AudioManager {
         this.bgmOscs = [];
         this.gainNode = null;
         this.currentTrack = 'none';
-        this.bgmTimeout = null;
+        this.bgmPlayer = document.getElementById('bgm-player');
+        this.tracks = {
+            mozart_pianosonata15: 'https://ontama-m.com/midi/data/mp3_file/classic/mozart_pianosonata15_1_piano.mp3',
+            mozart_pianoconcerto21: 'https://ontama-m.com/midi/data/mp3_file/classic/mozart_pianoconcerto21_3.mp3',
+            mozart_pianoconcerto26: 'https://ontama-m.com/midi/data/mp3_file/classic/mozart_pianoconcerto26_1.mp3',
+            chopin_kareinaru: 'https://ontama-m.com/midi/data/mp3_file/classic/chopin_kareinaru_piano.mp3',
+            chopin_koinunowaltz: 'https://ontama-m.com/midi/data/mp3_file/classic/chopin_koinunowaltz_piano.mp3',
+            chopin_nocturne9_2: 'https://ontama-m.com/midi/data/mp3_file/classic/chopin_nocturne9_2_piano.mp3'
+        };
     }
 
     init() {
@@ -42,50 +50,24 @@ class AudioManager {
         this.stopBGM();
         if (this.isMuted || this.currentTrack === 'none') return;
 
-        const melodies = {
-            satie: [369.99, 440.00, 392.00, 369.99, 277.18, 246.94], // ジムノペディ
-            bach: [739.99, 659.25, 587.33, 554.37, 493.88, 466.16, 493.88, 392.00], // G線上のアリア
-            beethoven: [207.65, 277.18, 329.63, 207.65, 277.18, 329.63, 220.00, 261.63, 349.23] // 月光
-        };
-
-        if (melodies[this.currentTrack]) {
-            this.playPianoStyle(melodies[this.currentTrack]);
+        const url = this.tracks[this.currentTrack];
+        if (url) {
+            this.bgmPlayer.src = url;
+            this.bgmPlayer.volume = 0.4;
+            this.bgmPlayer.play().catch(e => console.error("BGM Play Error:", e));
         }
     }
 
+    // 以前のシンセサイズ方式（将来の拡張やフォールバック用として残す場合はここに記述）
     playPianoStyle(melody) {
-        let idx = 0;
-        const play = () => {
-            if (this.isMuted || this.currentTrack === 'none') return;
-            const now = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator();
-            const g = this.ctx.createGain();
-            
-            // ピアノらしい音色にするため正弦波とわずかな減衰
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(melody[idx], now);
-            
-            g.gain.setValueAtTime(0, now);
-            g.gain.exponentialRampToValueAtTime(0.12, now + 0.05);
-            g.gain.exponentialRampToValueAtTime(0.001, now + 2.5);
-            
-            osc.connect(g);
-            g.connect(this.gainNode);
-            
-            osc.start(now);
-            osc.stop(now + 2.5);
-            this.bgmOscs.push(osc);
-            
-            idx = (idx + 1) % melody.length;
-            const tempos = { satie: 2500, bach: 2000, beethoven: 1200 };
-            const tempo = tempos[this.currentTrack] || 1500;
-            this.bgmTimeout = setTimeout(play, tempo);
-        };
-        play();
+        // 現在は使用していません
     }
 
     stopBGM() {
-        clearTimeout(this.bgmTimeout);
+        if (this.bgmPlayer) {
+            this.bgmPlayer.pause();
+            this.bgmPlayer.currentTime = 0;
+        }
         this.bgmOscs.forEach(osc => {
             try { osc.stop(); } catch(e) {}
         });
@@ -141,29 +123,39 @@ class AudioManager {
     }
 }
 
-class OldMaidGame {
+class DaifugoGame {
     constructor() {
         this.audio = new AudioManager();
         this.suits = ['♠', '♥', '♦', '♣'];
-        this.ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+        this.ranks = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2'];
         this.players = [
-            { id: 0, name: 'YOU', isCPU: false, hand: [], rank: 0 },
-            { id: 1, name: 'FOX', isCPU: true, hand: [], rank: 0 },
-            { id: 2, name: 'BEAR', isCPU: true, hand: [], rank: 0 },
-            { id: 3, name: 'RABBIT', isCPU: true, hand: [], rank: 0 }
+            { id: 0, name: 'YOU', isCPU: false, hand: [], rank: 0, passed: false, finished: false },
+            { id: 1, name: 'FOX', isCPU: true, hand: [], rank: 0, passed: false, finished: false },
+            { id: 2, name: 'BEAR', isCPU: true, hand: [], rank: 0, passed: false, finished: false },
+            { id: 3, name: 'RABBIT', isCPU: true, hand: [], rank: 0, passed: false, finished: false }
         ];
         this.deck = [];
         this.currentPlayerIndex = 0;
         this.isGameOver = false;
         this.isAnimating = false;
         this.finishedPlayersCount = 0;
-        this.draggedCardIndex = null;
+        this.selectedCardIndices = new Set();
+        
+        // Game State
+        this.fieldCards = [];
+        this.lastPlayerIndex = -1;
+        this.isRevolution = false;
+        this.roundTimeout = null;
 
         // DOM elements
         this.turnIndicator = document.getElementById('turn-indicator');
         this.messageOverlay = document.getElementById('message-overlay');
+        this.specialOverlay = document.getElementById('special-overlay');
         this.startBtn = document.getElementById('start-btn');
         this.resultOverlay = document.getElementById('result-overlay');
+        this.actionControls = document.getElementById('action-controls');
+        this.playBtn = document.getElementById('play-btn');
+        this.passBtn = document.getElementById('pass-btn');
 
         this.initEvents();
     }
@@ -184,11 +176,12 @@ class OldMaidGame {
         document.getElementById('bgm-selector').addEventListener('change', (e) => {
             this.audio.init();
             if (this.audio.isMuted) {
-                // 自動的にミュート解除
                 document.getElementById('sound-toggle').click();
             }
             this.audio.setTrack(e.target.value);
         });
+        this.playBtn.addEventListener('click', () => this.handlePlayClick());
+        this.passBtn.addEventListener('click', () => this.handlePassClick());
     }
 
     startGame() {
@@ -197,43 +190,92 @@ class OldMaidGame {
         this.finishedPlayersCount = 0;
         this.isGameOver = false;
         this.isAnimating = false;
-        
-        if (this.shuffleInterval) clearInterval(this.shuffleInterval);
-        this.shuffleInterval = setInterval(() => this.shuffleCPUsRandomly(), 8000);
+        this.isRevolution = false;
+        this.fieldCards = [];
+        this.lastPlayerIndex = -1;
+        this.selectedCardIndices.clear();
+        if (this.roundTimeout) clearTimeout(this.roundTimeout);
+
+        // UIの初期化
+        document.getElementById('field-cards').innerHTML = '';
+        this.specialOverlay.classList.add('hidden');
+        this.specialOverlay.textContent = '';
+
+        const previousRanks = this.players.map(p => ({ id: p.id, rank: p.rank }));
+        const hasPreviousRanks = previousRanks.some(r => r.rank > 0);
 
         this.players.forEach(p => {
             p.hand = [];
             p.rank = 0;
-            const badge = document.querySelector(`#player-${p.id} .rank-badge`);
-            if (badge) {
-                badge.classList.add('hidden');
-                badge.textContent = '';
+            p.passed = false;
+            p.finished = false;
+            const label = document.querySelector(`#player-${p.id} .rank-label`);
+            if (label) {
+                label.className = 'rank-label hidden';
+                label.textContent = '';
             }
         });
 
         this.createDeck();
         this.shuffleDeck();
         this.dealCards();
+        this.sortHands();
+
+        if (hasPreviousRanks) {
+            this.exchangeCards(previousRanks);
+        }
         
-        this.updateStatus('初期ペアを捨てています...');
-        setTimeout(() => {
-            this.players.forEach(p => {
-                p.hand = this.removePairs(p.hand);
-            });
-            this.checkFinishedPlayers();
-            this.renderAllHands();
-            this.startTurns();
-        }, 1500);
+        this.renderAllHands();
+        this.startTurns();
+    }
+
+    exchangeCards(previousRanks) {
+        const daifugo = this.players.find(p => previousRanks.find(r => r.id === p.id).rank === 1);
+        const fugo = this.players.find(p => previousRanks.find(r => r.id === p.id).rank === 2);
+        const hinmin = this.players.find(p => previousRanks.find(r => r.id === p.id).rank === 3);
+        const daihinmin = this.players.find(p => previousRanks.find(r => r.id === p.id).rank === 4);
+
+        if (!daifugo || !daihinmin) return;
+
+        // 大富豪と大貧民の交換 (2枚)
+        const daifugoWeakest = daifugo.hand.splice(0, 2);
+        const daihinminStrongest = daihinmin.hand.splice(-2);
+        daifugo.hand.push(...daihinminStrongest);
+        daihinmin.hand.push(...daifugoWeakest);
+
+        // 富豪と貧民の交換 (1枚)
+        if (fugo && hinmin) {
+            const fugoWeakest = fugo.hand.splice(0, 1);
+            const hinminStrongest = hinmin.hand.splice(-1);
+            fugo.hand.push(...hinminStrongest);
+            hinmin.hand.push(...fugoWeakest);
+        }
+
+        this.sortHands();
+        this.showSpecialMessage('カード交換が行われました', 2000);
+        this.audio.playSFX('discard');
+    }
+
+    startTurns() {
+        this.currentPlayerIndex = 0;
+        this.processTurn();
     }
 
     createDeck() {
         this.deck = [];
-        for (const suit of this.suits) {
-            for (const rank of this.ranks) {
-                this.deck.push({ suit, rank, isJoker: false, id: `card-${suit}-${rank}` });
-            }
-        }
-        this.deck.push({ suit: '🤡', rank: 'Joker', isJoker: true, id: 'card-joker' });
+        this.ranks.forEach((rank, val) => {
+            this.suits.forEach(suit => {
+                this.deck.push({ 
+                    suit, rank, 
+                    value: val + 1, // 3=1, 4=2, ..., 2=12
+                    isJoker: false, 
+                    id: `card-${suit}-${rank}` 
+                });
+            });
+        });
+        // 2 Jokers for Daifugo
+        this.deck.push({ suit: '🤡', rank: 'JK', value: 13, isJoker: true, id: 'card-joker-1' });
+        this.deck.push({ suit: '🤡', rank: 'JK', value: 13, isJoker: true, id: 'card-joker-2' });
     }
 
     shuffleDeck() {
@@ -250,35 +292,19 @@ class OldMaidGame {
         });
     }
 
-    removePairs(hand) {
-        const rankGroups = {};
-        hand.forEach(card => {
-            if (card.isJoker) return;
-            if (!rankGroups[card.rank]) rankGroups[card.rank] = [];
-            rankGroups[card.rank].push(card);
+    sortHands() {
+        this.players.forEach(p => {
+            p.hand.sort((a, b) => a.value - b.value);
         });
-
-        const newHand = [];
-        for (const rank in rankGroups) {
-            const cards = rankGroups[rank];
-            if (cards.length % 2 !== 0) {
-                newHand.push(cards[0]);
-            }
-        }
-        const joker = hand.find(c => c.isJoker);
-        if (joker) newHand.push(joker);
-        return newHand;
     }
 
     renderAllHands() {
         this.players.forEach(p => {
-            // Show cards if it's player or if player is finished
-            const isFaceDown = p.isCPU && p.hand.length > 0;
-            this.renderHand(p, isFaceDown);
+            this.renderHand(p);
         });
     }
 
-    renderHand(player, isFaceDown) {
+    renderHand(player) {
         const container = document.getElementById(`hand-${player.id}`);
         container.innerHTML = '';
         const hand = player.hand;
@@ -286,11 +312,13 @@ class OldMaidGame {
         if (totalCards === 0) return;
 
         const isVertical = player.id === 1 || player.id === 3;
-        const dimension = isVertical ? 250 : Math.min(600, window.innerWidth - 400);
-        const overlap = Math.min(isVertical ? 30 : 50, dimension / totalCards);
+        const dimension = isVertical ? 250 : Math.min(600, window.innerWidth - 300);
+        const overlap = Math.min(isVertical ? 25 : 40, dimension / totalCards);
         
         hand.forEach((card, index) => {
+            const isFaceDown = player.isCPU && !this.isGameOver;
             const cardEl = this.createCardElement(card, isFaceDown);
+            
             const offset = (index - (totalCards - 1) / 2) * overlap;
             
             if (isVertical) {
@@ -305,93 +333,16 @@ class OldMaidGame {
             }
             
             cardEl.style.zIndex = index;
-            
-            // Player hand drag and drop
-            if (!player.isCPU && !this.isGameOver) {
-                cardEl.setAttribute('draggable', 'true');
-                cardEl.addEventListener('dragstart', (e) => this.handleDragStart(e, index));
-                cardEl.addEventListener('dragover', (e) => this.handleDragOver(e));
-                cardEl.addEventListener('drop', (e) => this.handleDrop(e, index));
-                cardEl.addEventListener('dragend', () => cardEl.classList.remove('dragging'));
-            }
 
-            // Interaction: Only allow picking from the NEXT player in cycle
-            if (isFaceDown && !this.isGameOver) {
-                const nextTargetIdx = this.findNextTargetIndex(this.currentPlayerIndex);
-                if (player.id === nextTargetIdx && !this.players[this.currentPlayerIndex].isCPU) {
-                    cardEl.addEventListener('click', () => this.handleCardClick(player.id, index, cardEl));
-                    cardEl.style.cursor = 'pointer';
+            if (!player.isCPU && !this.isGameOver) {
+                if (this.selectedCardIndices.has(index)) {
+                    cardEl.classList.add('selected');
                 }
+                cardEl.addEventListener('click', () => this.toggleCardSelection(index));
             }
             
             container.appendChild(cardEl);
         });
-    }
-
-    handleDragStart(e, index) {
-        this.draggedCardIndex = index;
-        e.target.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-    }
-
-    handleDragOver(e) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        return false;
-    }
-
-    handleDrop(e, targetIndex) {
-        e.stopPropagation();
-        try {
-            if (this.draggedCardIndex !== null && this.draggedCardIndex !== targetIndex) {
-                const hand = this.players[0].hand;
-                // 安全策: インデックスが有効か確認
-                if (this.draggedCardIndex >= 0 && this.draggedCardIndex < hand.length) {
-                    const movedCard = hand.splice(this.draggedCardIndex, 1)[0];
-                    if (movedCard) {
-                        hand.splice(targetIndex, 0, movedCard);
-                        this.renderHand(this.players[0], false);
-                        this.audio.playSFX('click');
-                    }
-                }
-            }
-        } catch (err) {
-            console.error("Drop error:", err);
-        } finally {
-            this.draggedCardIndex = null;
-        }
-        return false;
-    }
-
-    async shuffleCPUsRandomly() {
-        if (this.isGameOver || this.isAnimating) return;
-        
-        // Pick a random CPU player (1, 2, or 3)
-        const cpuId = Math.floor(Math.random() * 3) + 1;
-        const cpu = this.players[cpuId];
-        if (cpu.hand.length < 2) return;
-
-        this.isAnimating = true; // Block other actions
-        try {
-            const container = document.getElementById(`hand-${cpuId}`);
-            container.classList.add('shuffling');
-            
-            // Logical shuffle
-            for (let i = cpu.hand.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [cpu.hand[i], cpu.hand[j]] = [cpu.hand[j], cpu.hand[i]];
-            }
-            
-            this.audio.playSFX('click');
-            await this.delay(500);
-            
-            this.renderHand(cpu, true);
-            container.classList.remove('shuffling');
-        } catch (e) {
-            console.error("Shuffle error:", e);
-        } finally {
-            this.isAnimating = false; // Release block
-        }
     }
 
     createCardElement(card, isFaceDown) {
@@ -407,9 +358,9 @@ class OldMaidGame {
         
         if (card.isJoker) {
             front.innerHTML = `
-                <div class="card-rank">Joker</div>
+                <div class="card-rank">JK</div>
                 <div class="card-suit">🤡</div>
-                <div class="card-rank" style="transform: rotate(180deg)">Joker</div>
+                <div class="card-rank" style="transform: rotate(180deg)">JK</div>
             `;
         } else {
             const isRed = card.suit === '♥' || card.suit === '♦';
@@ -431,37 +382,327 @@ class OldMaidGame {
         return cardEl;
     }
 
-    updateStatus(text) {
-        this.turnIndicator.textContent = text;
+    toggleCardSelection(index) {
+        if (this.isAnimating || this.currentPlayerIndex !== 0) return;
+        
+        if (this.selectedCardIndices.has(index)) {
+            this.selectedCardIndices.delete(index);
+        } else {
+            this.selectedCardIndices.add(index);
+        }
+        this.renderHand(this.players[0]);
+        this.audio.playSFX('click');
+        this.updateActionButtons();
     }
 
-    showMessage(text) {
-        this.messageOverlay.textContent = text;
-        this.messageOverlay.classList.remove('hidden');
-        setTimeout(() => {
-            this.messageOverlay.classList.add('hidden');
-        }, 1200);
+    updateActionButtons() {
+        const selectedCards = Array.from(this.selectedCardIndices).map(i => this.players[0].hand[i]);
+        const isValid = this.isValidMove(selectedCards);
+        this.playBtn.disabled = !isValid;
     }
 
-    findNextTargetIndex(currentIndex) {
-        let next = (currentIndex + 1) % this.players.length;
-        while (this.players[next].hand.length === 0) {
-            next = (next + 1) % this.players.length;
-            if (next === currentIndex) return -1; // Should not happen
+    isValidMove(selectedCards) {
+        if (selectedCards.length === 0) return false;
+
+        // Check if all selected cards are of the same rank (or include Joker)
+        const nonJokers = selectedCards.filter(c => !c.isJoker);
+        if (nonJokers.length > 0) {
+            const rank = nonJokers[0].value;
+            if (!nonJokers.every(c => c.value === rank)) return false;
+        }
+
+        // If field is empty, any set is valid
+        if (this.fieldCards.length === 0) return true;
+
+        // Must play same number of cards
+        if (selectedCards.length !== this.fieldCards.length) return false;
+
+        // Compare values
+        const fieldVal = this.getFieldValue();
+        const playVal = this.getCardsValue(selectedCards);
+
+        if (this.isRevolution) {
+            return playVal < fieldVal;
+        } else {
+            return playVal > fieldVal;
+        }
+    }
+
+    getCardsValue(cards) {
+        // For a set, we can just take the value of any non-joker, or Joker value (13)
+        const nonJoker = cards.find(c => !c.isJoker);
+        return nonJoker ? nonJoker.value : 13;
+    }
+
+    getFieldValue() {
+        return this.getCardsValue(this.fieldCards);
+    }
+
+    async handlePlayClick() {
+        if (this.isAnimating) return;
+        const indices = Array.from(this.selectedCardIndices).sort((a, b) => b - a);
+        const cardsToPlay = indices.map(i => this.players[0].hand.splice(i, 1)[0]);
+        this.selectedCardIndices.clear();
+        await this.playCards(cardsToPlay, 0);
+    }
+
+    async handlePassClick() {
+        if (this.isAnimating) return;
+        this.players[0].passed = true;
+        this.audio.playSFX('click');
+        this.nextTurn();
+    }
+
+    async playCards(cards, playerIndex) {
+        this.isAnimating = true;
+        const player = this.players[playerIndex];
+        
+        // Clear previous field visuals
+        if (this.fieldCards.length > 0) {
+            await this.clearFieldVisuals();
+        }
+
+        this.fieldCards = cards;
+        this.lastPlayerIndex = playerIndex;
+        this.audio.playSFX('flip');
+
+        // Animation: move cards to field
+        const promises = cards.map(card => {
+            const el = document.getElementById(card.id);
+            if (el) {
+                el.classList.remove('face-down');
+                return this.animateCardToField(el);
+            }
+            return Promise.resolve();
+        });
+        await Promise.all(promises);
+
+        // Render field
+        this.renderField();
+        this.renderHand(player);
+
+        // Check for 8-giri
+        const is8Giri = cards.some(c => c.rank === '8');
+        // Check for Revolution
+        if (cards.length >= 4) {
+            this.isRevolution = !this.isRevolution;
+            this.showSpecialMessage('REVOLUTION!', 2000);
+            this.audio.playSFX('discard');
+        }
+
+        // Check if player finished
+        if (player.hand.length === 0) {
+            this.finishPlayer(player);
+        }
+
+        if (is8Giri) {
+            this.showSpecialMessage('8-GIRI', 1000);
+            this.audio.playSFX('discard');
+            await this.delay(1000);
+            await this.resetRound(playerIndex);
+        } else {
+            this.isAnimating = false;
+            this.nextTurn();
+        }
+    }
+
+    renderField() {
+        const container = document.getElementById('field-cards');
+        container.innerHTML = '';
+        this.fieldCards.forEach((card, index) => {
+            const el = this.createCardElement(card, false);
+            const offset = (index - (this.fieldCards.length - 1) / 2) * 30;
+            el.style.left = `calc(50% + ${offset}px)`;
+            el.style.top = '50%';
+            el.style.transform = `translate(-50%, -50%) rotate(${Math.random() * 10 - 5}deg)`;
+            container.appendChild(el);
+        });
+    }
+
+    async clearFieldVisuals() {
+        const container = document.getElementById('field-cards');
+        const cards = Array.from(container.children);
+        const promises = cards.map(el => {
+            el.style.transition = 'all 0.5s ease-in';
+            el.style.transform = 'translate(1000px, -500px) rotate(360deg) scale(0.1)';
+            el.style.opacity = '0';
+            return this.delay(500);
+        });
+        await Promise.all(promises);
+        container.innerHTML = '';
+    }
+
+    async resetRound(starterIndex) {
+        this.fieldCards = [];
+        this.selectedCardIndices.clear(); // 選択をクリア
+        this.players.forEach(p => p.passed = false);
+        await this.clearFieldVisuals();
+        this.isAnimating = false; // アニメーションロックを解除
+        this.currentPlayerIndex = starterIndex;
+        // If starter finished, move to next
+        if (this.players[this.currentPlayerIndex].finished) {
+            this.currentPlayerIndex = this.findNextActivePlayer(this.currentPlayerIndex);
+        }
+        this.updateActivePlayerUI();
+        this.processTurn();
+    }
+
+    findNextActivePlayer(currentIdx) {
+        let next = (currentIdx + 1) % 4;
+        let count = 0;
+        while (this.players[next].finished && count < 4) {
+            next = (next + 1) % 4;
+            count++;
         }
         return next;
     }
 
-    startTurns() {
-        this.currentPlayerIndex = 0;
+    nextTurn() {
+        const activePlayersCount = this.players.filter(p => !p.finished).length;
+        if (activePlayersCount <= 1) {
+            this.endGame();
+            return;
+        }
+
+        // Find next player who hasn't passed and hasn't finished
+        let nextIdx = (this.currentPlayerIndex + 1) % 4;
+        let loopCount = 0;
+        while ((this.players[nextIdx].passed || this.players[nextIdx].finished) && loopCount < 4) {
+            nextIdx = (nextIdx + 1) % 4;
+            loopCount++;
+        }
+
+        // If everyone else passed, the last player to play wins the round
+        const stillInRound = this.players.filter(p => !p.passed && !p.finished);
+        if (stillInRound.length === 1 && stillInRound[0].id === this.lastPlayerIndex) {
+            this.roundTimeout = setTimeout(() => this.resetRound(this.lastPlayerIndex), 800);
+            return;
+        }
+        
+        // If somehow everyone passed (shouldn't happen with above logic but for safety)
+        if (stillInRound.length === 0) {
+            this.roundTimeout = setTimeout(() => this.resetRound(this.lastPlayerIndex !== -1 ? this.lastPlayerIndex : 0), 800);
+            return;
+        }
+
+        this.currentPlayerIndex = nextIdx;
         this.processTurn();
+    }
+
+    async processTurn() {
+        if (this.isGameOver) return;
+        this.updateActivePlayerUI();
+        
+        const player = this.players[this.currentPlayerIndex];
+        if (!player.isCPU) {
+            this.actionControls.classList.remove('hidden');
+            this.updateActionButtons();
+            this.updateStatus('あなたの番です。出すカードを選んでください');
+        } else {
+            this.actionControls.classList.add('hidden');
+            this.updateStatus(`${player.name}の番です...`);
+            await this.delay(1000);
+            this.cpuPlay(player);
+        }
+    }
+
+    cpuPlay(player) {
+        // Simple AI: play the smallest valid set
+        const hand = player.hand;
+        const fieldCount = this.fieldCards.length || 1;
+        
+        // Group cards by value
+        const groups = {};
+        hand.forEach(c => {
+            if (c.isJoker) return;
+            if (!groups[c.value]) groups[c.value] = [];
+            groups[c.value].push(c);
+        });
+
+        let possibleMoves = [];
+        
+        // Try sets of fieldCount (or sets of 1 if field is empty)
+        if (this.fieldCards.length === 0) {
+            // Can start with any set. CPU prefers smallest single or smallest pair.
+            for (let size = 1; size <= 4; size++) {
+                for (let val in groups) {
+                    if (groups[val].length === size) {
+                        possibleMoves.push(groups[val]);
+                    }
+                }
+            }
+            // Joker single?
+            const jokers = hand.filter(c => c.isJoker);
+            if (jokers.length > 0) possibleMoves.push([jokers[0]]);
+        } else {
+            // Find sets of exact fieldCount
+            for (let val in groups) {
+                if (groups[val].length >= fieldCount) {
+                    const move = groups[val].slice(0, fieldCount);
+                    if (this.isValidMove(move)) possibleMoves.push(move);
+                }
+            }
+            // Joker usage
+            const jokers = hand.filter(c => c.isJoker);
+            if (jokers.length > 0) {
+                // Try Joker + (fieldCount - 1) cards
+                for (let val in groups) {
+                    if (groups[val].length >= fieldCount - 1) {
+                        const move = [...groups[val].slice(0, fieldCount - 1), jokers[0]];
+                        if (this.isValidMove(move)) possibleMoves.push(move);
+                    }
+                }
+                // Pure Joker set
+                if (jokers.length >= fieldCount) {
+                    const move = jokers.slice(0, fieldCount);
+                    if (this.isValidMove(move)) possibleMoves.push(move);
+                }
+            }
+        }
+
+        if (possibleMoves.length > 0) {
+            // Sort by value considering Revolution
+            possibleMoves.sort((a, b) => {
+                const valA = this.getCardsValue(a);
+                const valB = this.getCardsValue(b);
+                return this.isRevolution ? valB - valA : valA - valB;
+            });
+            
+            const move = possibleMoves[0];
+            // Remove from hand
+            move.forEach(card => {
+                const idx = player.hand.findIndex(c => c.id === card.id);
+                player.hand.splice(idx, 1);
+            });
+            this.playCards(move, player.id);
+        } else {
+            player.passed = true;
+            this.showMessage(`${player.name}がパスしました`);
+            this.nextTurn();
+        }
+    }
+
+    finishPlayer(player) {
+        player.finished = true;
+        this.finishedPlayersCount++;
+        player.rank = this.finishedPlayersCount;
+        
+        const titles = ['大富豪', '富豪', '貧民', '大貧民'];
+        const rankClass = ['rank-daifugo', 'rank-fugo', 'rank-hinmin', 'rank-daihinmin'];
+        
+        const label = document.querySelector(`#player-${player.id} .rank-label`);
+        label.textContent = titles[player.rank - 1] || '貧民';
+        label.className = `rank-label ${rankClass[player.rank - 1] || 'rank-hinmin'}`;
+        label.classList.remove('hidden');
+        
+        this.showSpecialMessage(`${player.name} FINISH!`, 1500);
     }
 
     updateActivePlayerUI() {
         this.players.forEach(p => {
             const infoEl = document.querySelector(`#player-${p.id} .player-info`);
             if (infoEl) {
-                if (!this.isGameOver && p.id === this.currentPlayerIndex) {
+                if (p.id === this.currentPlayerIndex && !this.isGameOver) {
                     infoEl.classList.add('active');
                 } else {
                     infoEl.classList.remove('active');
@@ -470,210 +711,62 @@ class OldMaidGame {
         });
     }
 
-    async processTurn() {
-        if (this.isGameOver) return;
-        
-        this.updateActivePlayerUI();
-
-        const currentPlayer = this.players[this.currentPlayerIndex];
-        
-        // If current player is finished, move to next
-        if (currentPlayer.hand.length === 0) {
-            this.nextTurn();
-            return;
-        }
-
-        const targetIdx = this.findNextTargetIndex(this.currentPlayerIndex);
-        const targetPlayer = this.players[targetIdx];
-
-        if (currentPlayer.isCPU) {
-            this.isAnimating = true; // CPU動作中もロックをかける
-            try {
-                this.updateStatus(`${currentPlayer.name}の番です...`);
-                await this.delay(1000);
-                
-                const randomIndex = Math.floor(Math.random() * targetPlayer.hand.length);
-                const card = targetPlayer.hand.splice(randomIndex, 1)[0];
-                const cardEl = document.getElementById(card.id);
-                
-                if (cardEl) {
-                    cardEl.classList.add('face-down');
-                    this.audio.playSFX('click');
-                    await this.animateCardToHand(cardEl, currentPlayer.id);
-                }
-                
-                currentPlayer.hand.push(card);
-                this.renderAllHands();
-                
-                const pairIndex = this.findPairIndex(currentPlayer.hand, card);
-                if (pairIndex !== -1) {
-                    await this.delay(500);
-                    const card1 = card;
-                    const card2 = currentPlayer.hand.splice(pairIndex, 1)[0];
-                    const newCardIdx = currentPlayer.hand.indexOf(card1);
-                    currentPlayer.hand.splice(newCardIdx, 1);
-                    
-                    this.showMessage(`${currentPlayer.name}がペアを捨てました`);
-                    this.audio.playSFX('discard');
-                    await this.animateDiscard(card1.id, card2.id);
-                }
-                
-                this.checkFinishedPlayers();
-                this.renderAllHands();
-            } catch (e) {
-                console.error("CPU turn error:", e);
-            } finally {
-                this.isAnimating = false; // 終了後にロック解除
-                this.nextTurn();
-            }
-        } else {
-            this.updateStatus(`あなたの番です。${targetPlayer.name}から引いてください`);
-            this.renderAllHands();
-        }
-    }
-
-    async handleCardClick(targetPlayerId, cardIndex, clickedEl) {
-        if (this.players[this.currentPlayerIndex].isCPU || this.isAnimating) return;
-        
-        this.isAnimating = true;
-        try {
-            const targetPlayer = this.players[targetPlayerId];
-            const card = targetPlayer.hand.splice(cardIndex, 1)[0];
-            
-            clickedEl.classList.remove('face-down');
-            this.audio.playSFX('flip');
-            await this.animateCardToHand(clickedEl, 0);
-            
-            const currentPlayer = this.players[0];
-            currentPlayer.hand.push(card);
-            this.renderAllHands();
-            
-            const pairIndex = this.findPairIndex(currentPlayer.hand, card);
-            if (pairIndex !== -1) {
-                await this.delay(500);
-                const card1 = card;
-                const card2 = currentPlayer.hand.splice(pairIndex, 1)[0];
-                const newCardIdx = currentPlayer.hand.indexOf(card1);
-                currentPlayer.hand.splice(newCardIdx, 1);
-                
-                this.showMessage('ペアが揃いました！');
-                this.audio.playSFX('discard');
-                await this.animateDiscard(card1.id, card2.id);
-            }
-
-            this.checkFinishedPlayers();
-            this.renderAllHands();
-        } catch (e) {
-            console.error("Player turn error:", e);
-        } finally {
-            this.isAnimating = false;
-            this.nextTurn();
-        }
-    }
-
-    nextTurn() {
-        this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.players.length;
-        
-        // If only one person left with cards, it's the loser
-        const activePlayers = this.players.filter(p => p.hand.length > 0);
-        if (activePlayers.length <= 1) {
-            if (activePlayers.length === 1) {
-                const loser = activePlayers[0];
-                loser.rank = 4;
-                const badge = document.querySelector(`#player-${loser.id} .rank-badge`);
-                badge.textContent = `4位 (LOSE)`;
-                badge.classList.remove('hidden');
-            }
-            this.endGame();
-            return;
-        }
-
-        this.processTurn();
-    }
-
-    checkFinishedPlayers() {
-        this.players.forEach(p => {
-            if (p.hand.length === 0 && p.rank === 0) {
-                this.finishedPlayersCount++;
-                p.rank = this.finishedPlayersCount;
-                const badge = document.querySelector(`#player-${p.id} .rank-badge`);
-                badge.textContent = `${p.rank}位`;
-                badge.classList.remove('hidden');
-                this.showMessage(`${p.name}が上がりました！`);
-            }
-        });
-    }
-
-    findPairIndex(hand, newCard) {
-        if (newCard.isJoker) return -1;
-        return hand.findIndex(c => !c.isJoker && c.rank === newCard.rank && c.id !== newCard.id);
-    }
-
-    async animateCardToHand(cardEl, targetPlayerId) {
-        const targetContainer = document.getElementById(`hand-${targetPlayerId}`);
-        const rectStart = cardEl.getBoundingClientRect();
-        const rectEnd = targetContainer.getBoundingClientRect();
-        
-        const deltaX = rectEnd.left + rectEnd.width/2 - (rectStart.left + rectStart.width/2);
-        const deltaY = rectEnd.top + rectEnd.height/2 - (rectStart.top + rectStart.height/2);
+    async animateCardToField(cardEl) {
+        const fieldRect = document.getElementById('table-area').getBoundingClientRect();
+        const cardRect = cardEl.getBoundingClientRect();
+        const dx = fieldRect.left + fieldRect.width/2 - (cardRect.left + cardRect.width/2);
+        const dy = fieldRect.top + fieldRect.height/2 - (cardRect.top + cardRect.height/2);
         
         cardEl.style.transition = 'all 0.6s cubic-bezier(0.2, 0.8, 0.2, 1)';
-        cardEl.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(1.1)`;
+        cardEl.style.transform = `translate(${dx}px, ${dy}px) scale(1.1) rotate(${Math.random() * 20 - 10}deg)`;
         cardEl.style.zIndex = '1000';
-        
         await this.delay(600);
     }
 
-    async animateDiscard(id1, id2) {
-        const el1 = document.getElementById(id1);
-        const el2 = document.getElementById(id2);
-        const discardPile = document.getElementById('discard-pile');
-        const rectDiscard = discardPile.getBoundingClientRect();
-
-        const animate = (el) => {
-            if (!el) return;
-            const rect = el.getBoundingClientRect();
-            const dx = rectDiscard.left - rect.left;
-            const dy = rectDiscard.top - rect.top;
-            el.style.transition = 'all 0.8s ease-in';
-            el.style.transform = `translate(${dx}px, ${dy}px) rotate(${Math.random() * 360}deg) scale(0.5)`;
-            el.style.opacity = '0';
-        };
-
-        animate(el1);
-        animate(el2);
-        await this.delay(800);
+    showSpecialMessage(text, duration) {
+        this.specialOverlay.textContent = text;
+        this.specialOverlay.classList.remove('hidden');
+        setTimeout(() => this.specialOverlay.classList.add('hidden'), duration);
     }
 
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+    showMessage(text) {
+        this.messageOverlay.textContent = text;
+        this.messageOverlay.classList.remove('hidden');
+        setTimeout(() => this.messageOverlay.classList.add('hidden'), 1500);
     }
+
+    updateStatus(text) {
+        this.turnIndicator.textContent = text;
+    }
+
+    delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
     endGame() {
         this.isGameOver = true;
-        if (this.shuffleInterval) clearInterval(this.shuffleInterval);
-        this.updateActivePlayerUI();
-        const playerRank = this.players[0].rank;
-        let title = '';
-        let message = '';
-
-        if (playerRank === 1) {
-            title = '👑 1位！';
-            message = '最高です！あなたがチャンピオンです！';
-        } else if (playerRank === 4) {
-            title = '🤡 負け...';
-            message = '残念ながらジョーカーが残ってしまいました。';
-        } else {
-            title = `${playerRank}位`;
-            message = `お疲れ様でした！次は1位を目指しましょう。`;
+        this.actionControls.classList.add('hidden');
+        
+        // The last remaining player gets the last rank
+        const loser = this.players.find(p => !p.finished);
+        if (loser) {
+            this.finishPlayer(loser);
         }
 
-        document.getElementById('result-title').textContent = title;
-        document.getElementById('result-message').textContent = message;
+        const titles = ['大富豪', '富豪', '貧民', '大貧民'];
+        const rankListEl = document.getElementById('rank-list');
+        rankListEl.innerHTML = '';
+        
+        [...this.players].sort((a, b) => a.rank - b.rank).forEach(p => {
+            const item = document.createElement('div');
+            item.className = 'rank-item';
+            item.innerHTML = `<span>${p.rank}位: ${p.name}</span> <span class="rank-label">${titles[p.rank-1] || '貧民'}</span>`;
+            rankListEl.appendChild(item);
+        });
+
+        document.getElementById('result-title').textContent = this.players[0].id === 0 ? '👑 勝利！' : '終了';
         this.resultOverlay.classList.remove('hidden');
     }
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-    new OldMaidGame();
+    new DaifugoGame();
 });
