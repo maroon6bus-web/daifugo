@@ -221,12 +221,15 @@ class DaifugoGame {
         this.dealCards();
         this.sortHands();
 
+        let starterIndex = 0;
         if (hasPreviousRanks) {
             this.exchangeCards(previousRanks);
+            const daihinmin = this.players.find(p => previousRanks.find(r => r.id === p.id).rank === 4);
+            if (daihinmin) starterIndex = daihinmin.id;
         }
         
         this.renderAllHands();
-        this.startTurns();
+        this.startTurns(starterIndex);
     }
 
     exchangeCards(previousRanks) {
@@ -256,8 +259,8 @@ class DaifugoGame {
         this.audio.playSFX('discard');
     }
 
-    startTurns() {
-        this.currentPlayerIndex = 0;
+    startTurns(starterIndex = 0) {
+        this.currentPlayerIndex = starterIndex;
         this.processTurn();
     }
 
@@ -335,9 +338,23 @@ class DaifugoGame {
             cardEl.style.zIndex = index;
 
             if (!player.isCPU && !this.isGameOver) {
+                let isSelectable = true;
+                if (this.selectedCardIndices.size > 0 && !this.selectedCardIndices.has(index)) {
+                    const selectedCards = Array.from(this.selectedCardIndices).map(i => player.hand[i]);
+                    const nonJokers = selectedCards.filter(c => !c.isJoker);
+                    const targetValue = nonJokers.length > 0 ? nonJokers[0].value : null;
+
+                    if (!card.isJoker && targetValue !== null && card.value !== targetValue) {
+                        isSelectable = false;
+                    }
+                }
+
                 if (this.selectedCardIndices.has(index)) {
                     cardEl.classList.add('selected');
+                } else if (!isSelectable) {
+                    cardEl.classList.add('unselectable');
                 }
+
                 cardEl.addEventListener('click', () => this.toggleCardSelection(index));
             }
             
@@ -388,6 +405,19 @@ class DaifugoGame {
         if (this.selectedCardIndices.has(index)) {
             this.selectedCardIndices.delete(index);
         } else {
+            const player = this.players[0];
+            const clickedCard = player.hand[index];
+            
+            if (this.selectedCardIndices.size > 0) {
+                const selectedCards = Array.from(this.selectedCardIndices).map(i => player.hand[i]);
+                const nonJokers = selectedCards.filter(c => !c.isJoker);
+                const targetValue = nonJokers.length > 0 ? nonJokers[0].value : null;
+
+                if (!clickedCard.isJoker && targetValue !== null && clickedCard.value !== targetValue) {
+                    return; // Invalid selection
+                }
+            }
+
             this.selectedCardIndices.add(index);
         }
         this.renderHand(this.players[0]);
