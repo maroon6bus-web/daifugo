@@ -315,8 +315,17 @@ class DaifugoGame {
         if (totalCards === 0) return;
 
         const isVertical = player.id === 1 || player.id === 3;
-        const dimension = isVertical ? 250 : Math.min(600, window.innerWidth - 300);
-        const overlap = Math.min(isVertical ? 25 : 40, dimension / totalCards);
+        const isMobile = window.innerWidth <= 768;
+        
+        let dimension;
+        if (isVertical) {
+            dimension = isMobile ? window.innerHeight * 0.4 : 250;
+        } else {
+            dimension = isMobile ? window.innerWidth - 80 : Math.min(600, window.innerWidth - 300);
+        }
+        
+        const maxOverlap = isVertical ? (isMobile ? 15 : 25) : (isMobile ? 25 : 40);
+        const overlap = Math.min(maxOverlap, dimension / Math.max(1, totalCards));
         
         hand.forEach((card, index) => {
             const isFaceDown = player.isCPU && !this.isGameOver;
@@ -541,7 +550,8 @@ class DaifugoGame {
         container.innerHTML = '';
         this.fieldCards.forEach((card, index) => {
             const el = this.createCardElement(card, false);
-            const offset = (index - (this.fieldCards.length - 1) / 2) * 30;
+            const isMobile = window.innerWidth <= 768;
+            const offset = (index - (this.fieldCards.length - 1) / 2) * (isMobile ? 15 : 30);
             el.style.left = `calc(50% + ${offset}px)`;
             el.style.top = '50%';
             el.style.transform = `translate(-50%, -50%) rotate(${Math.random() * 10 - 5}deg)`;
