@@ -649,9 +649,9 @@ class DaifugoGame {
     }
 
     cpuPlay(player) {
-        // Simple AI: play the smallest valid set
         const hand = player.hand;
         const fieldCount = this.fieldCards.length || 1;
+        const isFieldEmpty = this.fieldCards.length === 0;
         
         // Group cards by value
         const groups = {};
@@ -662,10 +662,9 @@ class DaifugoGame {
         });
 
         let possibleMoves = [];
+        const jokers = hand.filter(c => c.isJoker);
         
-        // Try sets of fieldCount (or sets of 1 if field is empty)
-        if (this.fieldCards.length === 0) {
-            // Can start with any set. CPU prefers smallest single or smallest pair.
+        if (isFieldEmpty) {
             for (let size = 1; size <= 4; size++) {
                 for (let val in groups) {
                     if (groups[val].length === size) {
@@ -673,28 +672,21 @@ class DaifugoGame {
                     }
                 }
             }
-            // Joker single?
-            const jokers = hand.filter(c => c.isJoker);
             if (jokers.length > 0) possibleMoves.push([jokers[0]]);
         } else {
-            // Find sets of exact fieldCount
             for (let val in groups) {
                 if (groups[val].length >= fieldCount) {
                     const move = groups[val].slice(0, fieldCount);
                     if (this.isValidMove(move)) possibleMoves.push(move);
                 }
             }
-            // Joker usage
-            const jokers = hand.filter(c => c.isJoker);
             if (jokers.length > 0) {
-                // Try Joker + (fieldCount - 1) cards
                 for (let val in groups) {
                     if (groups[val].length >= fieldCount - 1) {
                         const move = [...groups[val].slice(0, fieldCount - 1), jokers[0]];
                         if (this.isValidMove(move)) possibleMoves.push(move);
                     }
                 }
-                // Pure Joker set
                 if (jokers.length >= fieldCount) {
                     const move = jokers.slice(0, fieldCount);
                     if (this.isValidMove(move)) possibleMoves.push(move);
@@ -703,20 +695,82 @@ class DaifugoGame {
         }
 
         if (possibleMoves.length > 0) {
-            // Sort by value considering Revolution
-            possibleMoves.sort((a, b) => {
-                const valA = this.getCardsValue(a);
-                const valB = this.getCardsValue(b);
-                return this.isRevolution ? valB - valA : valA - valB;
+            // Annotate moves
+            possibleMoves.forEach(move => {
+                move.sortValue = this.getCardsValue(move);
+                move.is8Giri = move.some(c => c.rank === '8');
+                move.hasJoker = move.some(c => c.isJoker);
+                move.size = move.length;
             });
-            
-            const move = possibleMoves[0];
-            // Remove from hand
-            move.forEach(card => {
-                const idx = player.hand.findIndex(c => c.id === card.id);
-                player.hand.splice(idx, 1);
-            });
-            this.playCards(move, player.id);
+
+            // AI Personalities
+            if (player.name === 'RABBIT') {
+                // Aggressive: Prioritize 8-giri and multiple cards if field is empty
+                possibleMoves.sort((a, b) => {
+                    if (a.is8Giri && !b.is8Giri) return -1;
+                    if (!a.is8Giri && b.is8Giri) return 1;
+                    if (isFieldEmpty) {
+                        if (a.size !== b.size) return b.size - a.size; // Prefer larger sets
+                    }
+                    return this.isRevolution ? b.sortValue - a.sortValue : a.sortValue - b.sortValue;
+                });
+            } else if (player.name === 'BEAR') {
+                // Cautious: Sort by weakest first
+                possibleMoves.sort((a, b) => this.isRevolution ? b.sortValue - a.sortValue : a.sortValue - b.sortValue);
+                
+                let move = possibleMoves[0];
+                let isStrong = this.isRevolution ? move.sortValue <= 3 : move.sortValue >= 11; // K, A, 2 (or 3, 4, 5 in Rev)
+                if (!isFieldEmpty && hand.length > 3) {
+                    if (isStrong || move.hasJoker) {
+                        // 80% chance to pass to save strong cards
+                        if (Math.random() < 0.8) {
+                            possibleMoves = []; // Force pass
+                        }
+                    }
+                }
+            } else if (player.name === 'FOX') {
+                // Smart: Conserve Joker for strong plays or 8-giri
+                possibleMoves.sort((a, b) => this.isRevolution ? b.sortValue - a.sortValue : a.sortValue - b.sortValue);
+                
+                possibleMoves = possibleMoves.filter(move => {
+                    if (!move.hasJoker) return true;
+                    let isStrong = this.isRevolution ? move.sortValue <= 4 : move.sortValue >= 10;
+                    if (hand.length <= 3) return true;
+                    if (move.is8Giri) return true;
+                    if (isStrong) return true;
+                    // If no other valid moves without Joker exist, and we filtered it out, we might pass.
+                    // To be smarter, FOX prefers to pass rather than waste Joker.
+                    return false;
+                });
+
+                if (isFieldEmpty && possibleMoves.length > 0) {
+                    // Re-sort to prioritize 8-giri or strong pairs to keep initiative
+                    possibleMoves.sort((a, b) => {
+                        if (a.is8Giri && !b.is8Giri) return -1;
+                        if (!a.is8Giri && b.is8Giri) return 1;
+                        let aIsStrong = this.isRevolution ? a.sortValue <= 4 : a.sortValue >= 10;
+                        let bIsStrong = this.isRevolution ? b.sortValue <= 4 : b.sortValue >= 10;
+                        if (a.size > 1 && aIsStrong && (b.size === 1 || !bIsStrong)) return -1;
+                        return this.isRevolution ? b.sortValue - a.sortValue : a.sortValue - b.sortValue;
+                    });
+                }
+            } else {
+                possibleMoves.sort((a, b) => this.isRevolution ? b.sortValue - a.sortValue : a.sortValue - b.sortValue);
+            }
+
+            if (possibleMoves.length > 0) {
+                const move = possibleMoves[0];
+                // Remove from hand
+                move.forEach(card => {
+                    const idx = player.hand.findIndex(c => c.id === card.id);
+                    player.hand.splice(idx, 1);
+                });
+                this.playCards(move, player.id);
+            } else {
+                player.passed = true;
+                this.showMessage(`${player.name}がパスしました`);
+                this.nextTurn();
+            }
         } else {
             player.passed = true;
             this.showMessage(`${player.name}がパスしました`);
