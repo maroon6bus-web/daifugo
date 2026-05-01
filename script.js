@@ -209,11 +209,6 @@ class DaifugoGame {
             p.rank = 0;
             p.passed = false;
             p.finished = false;
-            const label = document.querySelector(`#player-${p.id} .rank-label`);
-            if (label) {
-                label.className = 'rank-label hidden';
-                label.textContent = '';
-            }
         });
 
         this.createDeck();
@@ -496,10 +491,8 @@ class DaifugoGame {
         this.isAnimating = true;
         const player = this.players[playerIndex];
         
-        // Clear previous field visuals
-        if (this.fieldCards.length > 0) {
-            await this.clearFieldVisuals();
-        }
+        // Cards stack on the field, so we don't clear visuals here anymore
+        // They will be cleared in resetRound when everyone passes
 
         this.fieldCards = cards;
         this.lastPlayerIndex = playerIndex;
@@ -547,14 +540,23 @@ class DaifugoGame {
 
     renderField() {
         const container = document.getElementById('field-cards');
-        container.innerHTML = '';
+        // Do not clear innerHTML so cards stack
+        
+        // Add a slight random offset for the whole play to make it look like a pile
+        const pileOffsetX = (Math.random() * 30 - 15);
+        const pileOffsetY = (Math.random() * 30 - 15);
+
+        // Darken any existing cards on the field to make the new ones pop
+        const existingCards = Array.from(container.children);
+        existingCards.forEach(el => el.classList.add('darkened'));
+
         this.fieldCards.forEach((card, index) => {
             const el = this.createCardElement(card, false);
             const isMobile = window.innerWidth <= 768;
             const offset = (index - (this.fieldCards.length - 1) / 2) * (isMobile ? 15 : 30);
-            el.style.left = `calc(50% + ${offset}px)`;
-            el.style.top = '50%';
-            el.style.transform = `translate(-50%, -50%) rotate(${Math.random() * 10 - 5}deg)`;
+            el.style.left = `calc(50% + ${offset + pileOffsetX}px)`;
+            el.style.top = `calc(50% + ${pileOffsetY}px)`;
+            el.style.transform = `translate(-50%, -50%) rotate(${Math.random() * 20 - 10}deg)`;
             container.appendChild(el);
         });
     }
